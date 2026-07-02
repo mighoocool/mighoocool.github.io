@@ -1,3 +1,8 @@
+---
+layout: default
+title: 学习文档 01 - 应用启动与 Provider 树
+---
+
 # Lichtblick 学习文档 01：应用启动与 Provider 树
 
 > 对应母版：`docs/architecture-learning-outline.md`

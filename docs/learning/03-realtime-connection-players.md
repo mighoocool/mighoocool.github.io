@@ -1,3 +1,8 @@
+---
+layout: default
+title: 学习文档 03 - 实时连接 Player
+---
+
 # Lichtblick 学习文档 03：实时连接 Player
 
 > 对应母版：`docs/architecture-learning-outline.md`

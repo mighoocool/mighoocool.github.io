@@ -1,3 +1,8 @@
+---
+layout: default
+title: 学习文档 02 - 文件数据源与 IterablePlayer
+---
+
 # Lichtblick 学习文档 02：文件数据源与 IterablePlayer
 
 > 对应母版：`docs/architecture-learning-outline.md`

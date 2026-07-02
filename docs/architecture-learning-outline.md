@@ -1,3 +1,8 @@
+---
+layout: default
+title: Lichtblick 架构学习大纲与细则
+---
+
 # Lichtblick 架构学习大纲与细则
 
 > 状态：架构母版已完成。后续按第 16 章拆分生成专题学习文档。
