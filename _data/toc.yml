@@ -1,0 +1,13 @@
+# Learning-path navigation. Order here drives the sidebar timeline.
+- num: 母版
+  title: 架构学习大纲与细则
+  url: /docs/architecture-learning-outline.html
+- num: "01"
+  title: 应用启动与 Provider 树
+  url: /docs/learning/01-application-startup-and-provider-tree.html
+- num: "02"
+  title: 文件数据源与 IterablePlayer
+  url: /docs/learning/02-file-data-sources-and-iterable-player.html
+- num: "03"
+  title: 实时连接 Player
+  url: /docs/learning/03-realtime-connection-players.html

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ site.title }} · {{ site.description }}</title>
+<meta name="description" content="{{ site.description }}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ '/assets/css/style.css' | relative_url }}">
+<script>document.documentElement.dataset.theme=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');</script>
+</head>
+<body class="is-home">
+<header class="topbar">
+  <a class="brand" href="{{ '/' | relative_url }}"><span class="dot"></span>{{ site.title }} <small>· {{ site.tagline }}</small></a>
+  <div class="topbar-actions">
+    <a class="ghlink" href="https://github.com/{{ site.github.repository_nwo | default: 'mighoocool/mighoocool.github.io' }}" title="在 GitHub 查看">GitHub</a>
+    <button class="toggle" id="themeBtn" aria-label="切换明暗主题">切换主题</button>
+  </div>
+</header>
+
+<main class="home">
+  <section class="hero">
+    <p class="hero-eyebrow">Lichtblick / Foxglove 源码笔记</p>
+    <h1 class="hero-title">从源码读懂<br><span class="hl">数据播放</span>架构</h1>
+    <p class="hero-sub">{{ site.description }}。按一条学习路径，从进程启动、文件数据源到实时连接，逐个专题深入。</p>
+    <div class="hero-cta">
+      <a class="btn" href="{{ '/docs/learning/01-application-startup-and-provider-tree.html' | relative_url }}">从第 01 篇开始 →</a>
+      <a class="btn ghost" href="{{ '/docs/architecture-learning-outline.html' | relative_url }}">先看架构大纲</a>
+    </div>
+  </section>
+
+  <section class="path">
+    <p class="eyebrow">学习路径</p>
+    <ol class="cards">
+      {% for item in site.data.toc %}
+      <li class="card">
+        <a href="{{ item.url | relative_url }}">
+          <span class="card-num">{{ item.num }}</span>
+          <span class="card-title">{{ item.title }}</span>
+          <span class="card-go">阅读 →</span>
+        </a>
+      </li>
+      {% endfor %}
+    </ol>
+  </section>
+
+  {{ content }}
+</main>
+
+<footer class="foot">
+  <span>{{ site.title }}</span>
+  <a href="https://github.com/{{ site.github.repository_nwo | default: 'mighoocool/mighoocool.github.io' }}">GitHub</a>
+</footer>
+
+<script>window.__URL__ = "{{ page.url }}";</script>
+<script src="{{ '/assets/js/site.js' | relative_url }}" defer></script>
+</body>
+</html>

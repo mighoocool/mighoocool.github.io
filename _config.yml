@@ -1,3 +1,15 @@
-theme: jekyll-theme-minimal
-title: mighoo's homepage
-description: blablabla
+title: Lichtblick 架构学习
+description: 从源码读懂 Lichtblick 的数据播放架构
+tagline: 从源码读懂数据播放
+
+# Custom layouts under _layouts/ drive the site; no gem theme.
+markdown: kramdown
+highlighter: rouge
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+
+exclude:
+  - README.md
+  - Gemfile
+  - Gemfile.lock
