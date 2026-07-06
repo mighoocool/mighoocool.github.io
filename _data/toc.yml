@@ -11,3 +11,12 @@
 - num: "03"
   title: 实时连接 Player
   url: /docs/learning/03-realtime-connection-players.html
+- num: "04"
+  title: MessagePipeline 与帧背压
+  url: /docs/learning/04-message-pipeline-and-frame-backpressure.html
+- num: "05"
+  title: Layout 状态机与同步
+  url: /docs/learning/05-layout-state-machine-and-sync.html
+- num: "06"
+  title: Panel 与 PanelExtensionContext 生命周期
+  url: /docs/learning/06-panel-and-panel-extension-context-lifecycle.html
