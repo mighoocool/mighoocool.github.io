@@ -50,7 +50,19 @@
 <script src="{{ '/assets/js/site.js' | relative_url }}" defer></script>
 <script type="module">
   import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
-  window.__renderMermaid__ = (theme) => {
+  // Render each diagram at natural size (upscaling small ones to fill the column);
+  // the container scrolls horizontally for wide flowcharts so labels stay legible.
+  const fit = () => {
+    document.querySelectorAll('.mermaid > svg').forEach(svg => {
+      const vb = svg.viewBox.baseVal;
+      if (!vb || !vb.width) return;
+      const avail = svg.parentElement.clientWidth - 44;
+      svg.style.maxWidth = 'none';
+      svg.style.height = 'auto';
+      svg.style.width = Math.max(vb.width, avail) + 'px';
+    });
+  };
+  window.__renderMermaid__ = async (theme) => {
     // Rouge wraps unknown languages as <div class="language-mermaid ..."><pre><code>src</code></pre></div>
     document.querySelectorAll('.language-mermaid').forEach(host => {
       const code = host.querySelector('code') || host;
@@ -59,11 +71,14 @@
       div.textContent = code.textContent.replace(/\n$/, '');
       host.replaceWith(div);
     });
-    if (!document.querySelector('.mermaid')) return;
-    mermaid.initialize({ startOnLoad:false, theme: theme==='dark'?'dark':'neutral', securityLevel:'loose' });
-    mermaid.run({ querySelector: '.mermaid:not([data-processed])' });
+    if (!document.querySelector('.mermaid:not([data-processed])')) return;
+    mermaid.initialize({ startOnLoad:false, theme: theme==='dark'?'dark':'neutral',
+      securityLevel:'loose', flowchart:{ useMaxWidth:false }, sequence:{ useMaxWidth:false } });
+    await mermaid.run({ querySelector: '.mermaid:not([data-processed])' });
+    fit();
   };
   window.__renderMermaid__(document.documentElement.dataset.theme);
+  let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(fit, 150); });
 </script>
 </body>
 </html>

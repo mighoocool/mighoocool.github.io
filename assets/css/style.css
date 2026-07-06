@@ -89,7 +89,8 @@ main{padding:44px 52px 120px;min-width:0}
 #doc th,#doc td{border:1px solid var(--line);padding:9px 13px;text-align:left}
 #doc th{background:var(--accent-soft);font-family:var(--sans);font-weight:600}
 .mermaid{background:var(--surface);border:1px solid var(--line);border-radius:12px;
-  padding:22px;margin:22px 0;text-align:center;overflow-x:auto}
+  padding:22px;margin:22px 0;text-align:left;overflow-x:auto}
+.mermaid > svg{display:block}
 
 /* prev / next pager */
 .pager{display:flex;gap:14px;margin-top:64px;padding-top:26px;border-top:1px solid var(--line)}
