@@ -20,3 +20,15 @@
 - num: "06"
   title: Panel 与 PanelExtensionContext 生命周期
   url: /docs/learning/06-panel-and-panel-extension-context-lifecycle.html
+- num: "07"
+  title: 扩展加载与 Contribution Points
+  url: /docs/learning/07-extension-loading-and-contribution-points.html
+- num: "08"
+  title: Electron 进程与 IPC
+  url: /docs/learning/08-electron-processes-and-ipc.html
+- num: "09"
+  title: UserScriptPlayer 与变量
+  url: /docs/learning/09-userscript-player-and-variables.html
+- num: "10"
+  title: 性能、内存与调试
+  url: /docs/learning/10-performance-memory-and-debugging.html
