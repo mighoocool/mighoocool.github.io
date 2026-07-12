@@ -1,0 +1,3 @@
+这是一个示例文件，用于演示 /static 下载目录。
+把你要分享的文件放进仓库的 static/ 目录并推送，就会自动出现在 mighoocool.github.io/static 列表中。
+可以删掉这个示例文件。
