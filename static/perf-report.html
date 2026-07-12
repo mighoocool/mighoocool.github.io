@@ -1,0 +1,620 @@
+<title>Lichtblick 播放渲染性能分析</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --surface: #161b22;
+    --surface-2: #1c222c;
+    --border: #2a313d;
+    --border-soft: #222836;
+    --text: #e7ebf2;
+    --muted: #94a0b1;
+    --faint: #67707e;
+    --accent: #f2762a;
+    --accent-soft: #ff9a5b;
+    --good: #46c08a;
+    --warn: #e2a83e;
+    --crit: #e85c50;
+    --flame-a: #f2762a;
+    --flame-b: #ffb057;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f5f6f9;
+      --surface: #ffffff;
+      --surface-2: #eef1f5;
+      --border: #dce0e8;
+      --border-soft: #e6e9ef;
+      --text: #171c24;
+      --muted: #59636f;
+      --faint: #8a93a0;
+      --accent: #e05f17;
+      --accent-soft: #c8500e;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1116; --surface: #161b22; --surface-2: #1c222c; --border: #2a313d;
+    --border-soft: #222836; --text: #e7ebf2; --muted: #94a0b1; --faint: #67707e;
+    --accent: #f2762a; --accent-soft: #ff9a5b;
+  }
+  :root[data-theme="light"] {
+    --bg: #f5f6f9; --surface: #ffffff; --surface-2: #eef1f5; --border: #dce0e8;
+    --border-soft: #e6e9ef; --text: #171c24; --muted: #59636f; --faint: #8a93a0;
+    --accent: #e05f17; --accent-soft: #c8500e;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1020px; margin: 0 auto; padding: 40px 24px 96px; }
+
+  /* ---------- header ---------- */
+  header { margin-bottom: 40px; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  .eyebrow::before {
+    content: ""; width: 22px; height: 2px; background: var(--accent);
+  }
+  h1 {
+    font-size: clamp(28px, 4.4vw, 44px);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    margin: 0 0 14px;
+    text-wrap: balance;
+    font-weight: 680;
+  }
+  .sub {
+    color: var(--muted);
+    max-width: 62ch;
+    font-size: 16px;
+    margin: 0;
+  }
+  .meta {
+    display: flex; flex-wrap: wrap; gap: 8px 20px;
+    margin-top: 22px; font-family: var(--mono); font-size: 12.5px; color: var(--faint);
+  }
+  .meta span { display: inline-flex; gap: 7px; align-items: center; }
+  .meta b { color: var(--muted); font-weight: 500; }
+
+  /* ---------- verdict banner ---------- */
+  .verdict {
+    display: flex; align-items: flex-start; gap: 18px;
+    background: color-mix(in srgb, var(--good) 12%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--good) 40%, var(--border));
+    border-radius: 14px; padding: 22px 24px; margin: 32px 0 40px;
+  }
+  .verdict .dot {
+    flex: none; width: 12px; height: 12px; border-radius: 50%;
+    background: var(--good); margin-top: 6px;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--good) 22%, transparent);
+  }
+  .verdict h2 { margin: 0 0 4px; font-size: 18px; letter-spacing: -0.01em; }
+  .verdict p { margin: 0; color: var(--muted); font-size: 14.5px; max-width: 70ch; }
+  .verdict .good-text { color: var(--good); }
+
+  /* ---------- KPI grid ---------- */
+  .kpis {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 12px;
+  }
+  .kpi {
+    background: var(--surface); border: 1px solid var(--border-soft);
+    border-radius: 12px; padding: 18px 18px 16px; position: relative; overflow: hidden;
+  }
+  .kpi .label {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--faint); margin-bottom: 10px;
+  }
+  .kpi .val {
+    font-size: 30px; font-weight: 640; letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums; line-height: 1;
+  }
+  .kpi .val small { font-size: 15px; color: var(--muted); font-weight: 500; margin-left: 2px; }
+  .kpi .note { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .kpi .stripe { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+  .kpi.good .stripe { background: var(--good); }
+  .kpi.warn .stripe { background: var(--warn); }
+  .kpi.good .val { color: var(--good); }
+
+  /* utilization strip */
+  .util {
+    background: var(--surface); border: 1px solid var(--border-soft);
+    border-radius: 12px; padding: 20px 22px; margin: 28px 0 52px;
+  }
+  .util .head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; flex-wrap: wrap; gap: 6px; }
+  .util .head h3 { margin: 0; font-size: 14px; font-weight: 600; }
+  .util .head .legend { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .bar-track {
+    height: 34px; border-radius: 8px; overflow: hidden; display: flex;
+    background: var(--surface-2); border: 1px solid var(--border);
+  }
+  .bar-busy {
+    width: 15%; background: linear-gradient(90deg, var(--flame-a), var(--flame-b));
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 12px; font-weight: 600; color: #1a1206;
+    min-width: 46px;
+  }
+  .bar-idle {
+    flex: 1; display: flex; align-items: center; padding-left: 14px;
+    font-family: var(--mono); font-size: 12px; color: var(--faint);
+  }
+
+  /* ---------- section heading ---------- */
+  .sec-head { margin: 0 0 6px; display: flex; align-items: baseline; gap: 12px; }
+  .sec-head h2 { font-size: 22px; letter-spacing: -0.015em; margin: 0; }
+  .sec-head .count { font-family: var(--mono); font-size: 13px; color: var(--faint); }
+  .sec-desc { color: var(--muted); margin: 0 0 26px; font-size: 14.5px; max-width: 68ch; }
+
+  /* ---------- hotspot cards ---------- */
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 0; margin-bottom: 22px; overflow: hidden;
+  }
+  .card .top { padding: 22px 24px 18px; }
+  .card .rank {
+    display: inline-flex; align-items: center; gap: 10px; margin-bottom: 12px;
+  }
+  .badge {
+    font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
+    padding: 4px 9px; border-radius: 6px; text-transform: uppercase;
+  }
+  .badge.p1 { background: color-mix(in srgb, var(--crit) 18%, transparent); color: var(--crit); }
+  .badge.p2 { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
+  .badge.p3 { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+  .badge.p4 { background: color-mix(in srgb, var(--muted) 18%, transparent); color: var(--muted); }
+  .card h3 { margin: 0 0 4px; font-size: 18.5px; letter-spacing: -0.01em; }
+  .card .whereami { font-family: var(--mono); font-size: 12.5px; color: var(--faint); }
+
+  /* self-time bar */
+  .selft { display: flex; align-items: center; gap: 14px; margin: 16px 0 6px; }
+  .selft .track { flex: 1; height: 22px; background: var(--surface-2); border-radius: 6px; overflow: hidden; }
+  .selft .fill {
+    height: 100%; background: linear-gradient(90deg, var(--flame-a), var(--flame-b));
+    border-radius: 6px; transform-origin: left; animation: grow .9s cubic-bezier(.2,.7,.2,1) both;
+  }
+  .selft .ms { font-family: var(--mono); font-size: 14px; font-weight: 640; font-variant-numeric: tabular-nums; min-width: 92px; text-align: right; }
+  @keyframes grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+  @media (prefers-reduced-motion: reduce) { .selft .fill { animation: none; } }
+
+  /* body split */
+  .split { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--border); }
+  .split > div { padding: 20px 24px; }
+  .split .chain-col { border-right: 1px solid var(--border); background: color-mix(in srgb, var(--surface-2) 55%, var(--surface)); }
+  .col-label {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--faint); margin-bottom: 14px; display: flex; align-items: center; gap: 8px;
+  }
+  .col-label::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+  /* call chain stack */
+  .chain { font-family: var(--mono); font-size: 12.5px; margin: 0; }
+  .frame {
+    display: flex; align-items: baseline; gap: 8px; padding: 3px 0; position: relative;
+  }
+  .frame .fn { color: var(--text); }
+  .frame .src { color: var(--faint); font-size: 11.5px; }
+  .frame.leaf .fn { color: var(--accent-soft); font-weight: 600; }
+  .frame .arrow { color: var(--faint); width: 12px; flex: none; }
+  .frame.leaf .arrow { color: var(--accent); }
+  .chain .indent { display: inline-block; }
+
+  .cause p, .fix p { margin: 0 0 10px; font-size: 14px; color: var(--muted); }
+  .cause p:last-child, .fix p:last-child { margin-bottom: 0; }
+  .cause strong, .fix strong { color: var(--text); font-weight: 600; }
+  .fix .col-label { color: var(--good); }
+  .fix .col-label::after { background: color-mix(in srgb, var(--good) 30%, var(--border)); }
+  code.inline {
+    font-family: var(--mono); font-size: 12px; background: var(--surface-2);
+    padding: 1px 6px; border-radius: 5px; color: var(--accent-soft);
+    border: 1px solid var(--border-soft);
+  }
+
+  /* worker note */
+  .worker {
+    background: var(--surface); border: 1px dashed var(--border);
+    border-radius: 14px; padding: 22px 24px; margin-top: 8px;
+  }
+  .worker h3 { margin: 0 0 6px; font-size: 16px; }
+  .worker p { margin: 0 0 14px; color: var(--muted); font-size: 14px; max-width: 72ch; }
+  .worker .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    font-family: var(--mono); font-size: 12px; padding: 5px 11px; border-radius: 20px;
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--muted);
+  }
+  .chip b { color: var(--text); font-weight: 600; }
+
+  /* priority ladder */
+  .ladder { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; counter-reset: step; }
+  .rung {
+    display: grid; grid-template-columns: 40px 1fr auto; align-items: center; gap: 16px;
+    padding: 16px 20px; background: var(--surface); border: 1px solid var(--border-soft);
+  }
+  .rung:first-child { border-radius: 12px 12px 0 0; }
+  .rung:last-child { border-radius: 0 0 12px 12px; }
+  .rung + .rung { border-top: none; }
+  .rung .n { font-family: var(--mono); font-size: 20px; font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .rung .txt strong { display: block; font-size: 15px; margin-bottom: 2px; }
+  .rung .txt span { font-size: 13px; color: var(--muted); }
+  .rung .effort { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 10px; border-radius: 6px; white-space: nowrap; }
+  .effort.low { background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good); }
+  .effort.med { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+  .effort.high { background: color-mix(in srgb, var(--crit) 16%, transparent); color: var(--crit); }
+
+  h2.block { font-size: 22px; letter-spacing: -0.015em; margin: 56px 0 8px; }
+  .block-desc { color: var(--muted); margin: 0 0 24px; font-size: 14.5px; }
+
+  footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); font-family: var(--mono); font-size: 12px; color: var(--faint); }
+
+  /* ---------- end-to-end pipeline ---------- */
+  .pipe { display: flex; flex-direction: column; gap: 0; margin-top: 8px; }
+  .stage {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    padding: 18px 20px; position: relative;
+  }
+  .stage .shead { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+  .stage .snum {
+    font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--bg);
+    background: var(--accent); width: 22px; height: 22px; border-radius: 6px;
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+  }
+  .stage .stitle { font-size: 15.5px; font-weight: 640; letter-spacing: -0.01em; }
+  .thread-tag {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 3px 8px; border-radius: 5px; border: 1px solid var(--border);
+  }
+  .thread-tag.worker { color: var(--accent-soft); background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+  .thread-tag.main { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); border-color: color-mix(in srgb, var(--good) 35%, var(--border)); }
+  .thread-tag.gpu { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); border-color: color-mix(in srgb, var(--warn) 35%, var(--border)); }
+
+  .flow { font-family: var(--mono); font-size: 12.5px; line-height: 1.4; }
+  .flow .f { display: flex; align-items: baseline; gap: 8px; padding: 2.5px 0; }
+  .flow .f .g { color: var(--faint); flex: none; width: 14px; }
+  .flow .f .fn2 { color: var(--text); }
+  .flow .f .fn2.hot { color: var(--accent-soft); font-weight: 600; }
+  .flow .f .s2 { color: var(--faint); font-size: 11px; }
+  .flow .f .ms2 { margin-left: auto; color: var(--faint); font-variant-numeric: tabular-nums; font-size: 11.5px; }
+  .flow .depth1 { padding-left: 14px; } .flow .depth2 { padding-left: 28px; }
+  .flow .depth3 { padding-left: 42px; } .flow .depth4 { padding-left: 56px; }
+  .flow .depth5 { padding-left: 70px; } .flow .depth6 { padding-left: 84px; }
+  .flow .depth7 { padding-left: 98px; } .flow .depth8 { padding-left: 112px; }
+
+  .connector {
+    display: flex; align-items: center; gap: 12px; padding: 10px 22px; color: var(--muted);
+    font-family: var(--mono); font-size: 12px;
+  }
+  .connector .line { width: 2px; height: 26px; background: linear-gradient(var(--accent), transparent); margin-left: 10px; }
+  .connector.boundary {
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+    border: 1px dashed color-mix(in srgb, var(--accent) 40%, var(--border));
+    border-radius: 10px; margin: 10px 0; padding: 12px 18px; justify-content: center; color: var(--accent-soft);
+  }
+  .branch-note { font-family: var(--mono); font-size: 11.5px; color: var(--faint); margin: 14px 0 8px; padding-left: 2px; }
+  .branches { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .branches .stage { border-radius: 12px; }
+  .arrowdown { text-align: center; color: var(--accent); font-size: 15px; padding: 6px 0; }
+
+  @media (max-width: 720px) {
+    .kpis { grid-template-columns: repeat(2, 1fr); }
+    .split { grid-template-columns: 1fr; }
+    .split .chain-col { border-right: none; border-bottom: 1px solid var(--border); }
+    .branches { grid-template-columns: 1fr; }
+    .flow { font-size: 11.5px; }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Chrome DevTools Trace · 播放渲染剖析</div>
+    <h1>播放时的渲染性能剖析</h1>
+    <p class="sub">对 <code class="inline">sample-nuscenes</code> 数据源做播放操作，录制约 5 秒主线程 trace，聚合 JS CPU Profile 的 self-time 与调用链，定位可优化的渲染开销。</p>
+    <div class="meta">
+      <span><b>数据源</b> sample-nuscenes</span>
+      <span><b>录制窗口</b> ~8.7 s</span>
+      <span><b>采样事件</b> 125,741</span>
+      <span><b>CPU 节流</b> 1×</span>
+      <span><b>trace</b> output/playback-trace.json (214 MB)</span>
+    </div>
+  </header>
+
+  <div class="verdict">
+    <span class="dot"></span>
+    <div>
+      <h2>结论：<span class="good-text">渲染本身没有瓶颈</span></h2>
+      <p>播放期间主渲染线程只用了约 15% 的时间，没有任何长任务（最长单任务 8.6 ms &lt; 16 ms 帧预算），约 2130 帧里仅 7 帧掉帧。帧率健康、余量充足。下面列出的是主线程上仍值得优化的开销，以及一个与渲染解耦的数据线程。</p>
+    </div>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi good"><span class="stripe"></span><div class="label">主线程繁忙度</div><div class="val">15<small>%</small></div><div class="note">8.7 s 内仅 1302 ms</div></div>
+    <div class="kpi good"><span class="stripe"></span><div class="label">长任务 &gt;16ms</div><div class="val">0</div><div class="note">最长任务 8.6 ms</div></div>
+    <div class="kpi warn"><span class="stripe"></span><div class="label">掉帧</div><div class="val">7</div><div class="note">约 2130 帧中</div></div>
+    <div class="kpi good"><span class="stripe"></span><div class="label">最大空闲</div><div class="val">76<small>%</small></div><div class="note">主线程有大量余量</div></div>
+  </div>
+
+  <div class="util">
+    <div class="head">
+      <h3>主渲染线程时间占用（8.7 s 窗口）</h3>
+      <span class="legend">busy 1302 ms · idle 7389 ms</span>
+    </div>
+    <div class="bar-track">
+      <div class="bar-busy">15%</div>
+      <div class="bar-idle">85% idle — 每帧都在预算内完成</div>
+    </div>
+  </div>
+
+  <div class="sec-head">
+    <h2>端到端调用链：从数据解析到渲染</h2>
+    <span class="count">采样自 trace · parent 链重建</span>
+  </div>
+  <p class="sec-desc">播放时一条消息的完整旅程：Worker 里解析/解压 MCAP → 通过 comlink 跨线程回主线程 → Player 派发状态 → 触发两条并行的渲染路径（React 提交 DOM 面板 & three.js RAF 绘制 3D 面板）。<span style="color:var(--accent-soft)">橙色</span>为前面卡片里定位到的热点帧。</p>
+
+  <div class="pipe">
+    <!-- Stage 1: worker parse -->
+    <div class="stage">
+      <div class="shead"><span class="snum">1</span><span class="stitle">MCAP 数据解析 &amp; 解压</span><span class="thread-tag worker">Web Worker</span></div>
+      <div class="flow">
+        <div class="f"><span class="g">●</span><span class="fn2">(root)</span></div>
+        <div class="f depth1"><span class="g">↳</span><span class="fn2">#loadChunkData</span><span class="s2">McapIndexedReader.js:357</span><span class="ms2">563 ms</span></div>
+        <div class="f depth2"><span class="g">↳</span><span class="fn2">parseRecord</span><span class="s2">parse.js:29</span></div>
+        <div class="f depth3"><span class="g">↳</span><span class="fn2">parseChunk</span><span class="s2">parse.js:182</span></div>
+        <div class="f depth3"><span class="g">↳</span><span class="fn2 hot">lz4</span><span class="s2">decompressHandlers.ts:28 · 解压</span></div>
+        <div class="f depth2"><span class="g">↳</span><span class="fn2">messageIterator</span><span class="s2">McapIndexedIterableSource.ts:124</span></div>
+      </div>
+    </div>
+
+    <div class="connector boundary">↕ postMessage（comlink）· 跨线程边界 Worker → Main</div>
+
+    <!-- Stage 2: player -->
+    <div class="stage">
+      <div class="shead"><span class="snum">2</span><span class="stitle">Player 派发状态</span><span class="thread-tag main">Main 主线程</span></div>
+      <div class="flow">
+        <div class="f"><span class="g">●</span><span class="fn2">callback</span><span class="s2">comlink.mjs（收到 worker 消息）</span></div>
+        <div class="f depth1"><span class="g">↳</span><span class="fn2">#updateState</span><span class="s2">IterablePlayer.ts</span></div>
+        <div class="f depth2"><span class="g">↳</span><span class="fn2">#emitState</span><span class="s2">MessageHandler.ts</span></div>
+        <div class="f depth3"><span class="g">↳</span><span class="fn2">listener → setState</span><span class="s2">触发订阅者重渲染</span></div>
+      </div>
+    </div>
+
+    <div class="arrowdown">▾ 状态更新驱动两条并行渲染路径 ▾</div>
+
+    <div class="branches">
+      <!-- 3a React -->
+      <div class="stage">
+        <div class="shead"><span class="snum">3</span><span class="stitle">React 渲染 &amp; 提交 · DOM 面板</span></div>
+        <div class="thread-tag main" style="margin-bottom:12px; display:inline-block;">Main 主线程</div>
+        <div class="flow">
+          <div class="f"><span class="g">●</span><span class="fn2">performConcurrentWorkOnRoot</span><span class="s2">react-dom</span></div>
+          <div class="f depth1"><span class="g">↳</span><span class="fn2">renderRootSync → beginWork</span><span class="s2">组件 render</span></div>
+          <div class="f depth2"><span class="g">↳</span><span class="fn2 hot">getBoundingClientRect</span><span class="s2">HoverTooltip.tsx:257</span><span class="ms2">295 ms</span></div>
+          <div class="f depth1"><span class="g">↳</span><span class="fn2">commitMutationEffectsOnFiber</span><span class="s2">commit 阶段</span></div>
+          <div class="f depth2"><span class="g">↳</span><span class="fn2">updateProperties → updateDOMProperties</span></div>
+          <div class="f depth3"><span class="g">↳</span><span class="fn2 hot">set value / setValueForStyles</span><span class="s2">写 DOM 属性/样式</span><span class="ms2">1232 ms</span></div>
+          <div class="f depth1"><span class="g">↳</span><span class="fn2">commitLayoutEffects</span></div>
+          <div class="f depth2"><span class="g">↳</span><span class="fn2 hot">onRender（&lt;Profiler&gt;）</span><span class="s2">Panel.tsx:559</span><span class="ms2">115 ms</span></div>
+        </div>
+      </div>
+
+      <!-- 3b three.js -->
+      <div class="stage">
+        <div class="shead"><span class="snum">3</span><span class="stitle">three.js 绘制 · 3D 面板</span></div>
+        <div class="thread-tag gpu" style="margin-bottom:12px; display:inline-block;">Main → GPU（RAF 循环）</div>
+        <div class="flow">
+          <div class="f"><span class="g">●</span><span class="fn2">animationFrame</span><span class="s2">Renderer.ts:1012</span></div>
+          <div class="f depth1"><span class="g">↳</span><span class="fn2">#frameHandler</span><span class="s2">Renderer.ts:1045</span></div>
+          <div class="f depth2"><span class="g">↳</span><span class="fn2">WebGLRenderer.render</span><span class="s2">three.module.js</span></div>
+          <div class="f depth3"><span class="g">↳</span><span class="fn2">renderScene → renderObjects</span></div>
+          <div class="f depth4"><span class="g">↳</span><span class="fn2">renderBufferDirect → setProgram</span></div>
+          <div class="f depth5"><span class="g">↳</span><span class="fn2">setTexture2D → uploadTexture</span></div>
+          <div class="f depth6"><span class="g">↳</span><span class="fn2 hot">texSubImage2D</span><span class="s2">GPU 纹理上传</span><span class="ms2">115 ms</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec-head" style="margin-top:56px;">
+    <h2>主线程渲染热点</h2>
+    <span class="count">按 self-time 排序 · 含调用链</span>
+  </div>
+  <p class="sec-desc">下列函数即使主线程整体空闲，仍是播放期间反复执行、可以进一步压缩的部分。每张卡片左侧是采样重建的调用链（●&nbsp;为叶子帧，↑&nbsp;向调用者回溯），右侧是原因与优化建议。</p>
+
+  <!-- CARD A -->
+  <div class="card">
+    <div class="top">
+      <div class="rank"><span class="badge p1">收益最大</span></div>
+      <h3>React 提交阶段每帧重写 DOM 属性 / 样式</h3>
+      <div class="whereami">react-dom.development.js · commit 阶段</div>
+      <div class="selft">
+        <div class="track"><div class="fill" style="width:100%"></div></div>
+        <div class="ms">~1232 ms</div>
+      </div>
+      <div class="whereami">= set value 835 ms + setValueForStyles 274 ms + set 123 ms</div>
+    </div>
+    <div class="split">
+      <div class="chain-col">
+        <div class="col-label">调用链</div>
+        <div class="chain">
+          <div class="frame leaf"><span class="arrow">●</span><span class="fn">set value</span><span class="src">/ setValueForStyles</span></div>
+          <div class="frame"><span class="arrow">↑</span><span class="fn">updateWrapper</span><span class="src">updateDOMProperties</span></div>
+          <div class="frame"><span class="arrow">↑</span><span class="fn">updateProperties</span></div>
+          <div class="frame"><span class="arrow">↑</span><span class="fn">commitUpdate</span></div>
+          <div class="frame"><span class="arrow">↑</span><span class="fn">commitMutationEffectsOnFiber</span></div>
+          <div class="frame"><span class="arrow">↑</span><span class="fn">recursivelyTraverseMutationEffects</span></div>
+        </div>
+      </div>
+      <div class="split-body">
+        <div class="cause">
+          <div class="col-label">原因</div>
+          <p>播放时大量组件<strong>每帧重渲染</strong>，React 在 commit（mutation）阶段对每个变化的 DOM 节点走 <code class="inline">updateProperties</code>，逐个把 inline <code class="inline">style</code> 和 input 的 <code class="inline">value</code> 重新写回 DOM。时间轴、seek bar、数值显示这类每帧变化的组件，把大量成本花在了属性写入上。</p>
+        </div>
+        <div class="fix">
+          <div class="col-label">优化建议</div>
+          <p><strong>减少每帧重渲染的组件面积</strong>：对高频组件做 <code class="inline">memo</code> / 稳定 props。</p>
+          <p><strong>绕开 React 逐帧改样式</strong>：把位置类样式改用 CSS <code class="inline">transform</code>，或对高频更新用 <code class="inline">ref</code> 命令式写入，避免走 <code class="inline">updateProperties</code> 的全量属性 diff+写。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CARD B -->
+  <div class="card">
+    <div class="top">
+      <div class="rank"><span class="badge p2">最易落地</span></div>
+      <h3>每个面板的 &lt;Profiler&gt; 调试计数器</h3>
+      <div class="whereami">Panel.tsx:559 → onRender</div>
+      <div class="selft">
+        <div class="track"><div class="fill" style="width:9.3%"></div></div>
+        <div class="ms">115 ms</div>
+      </div>
+    </div>
+    <div class="split">
+      <div class="chain-col">
+        <div class="col-label">调用链</div>
+        <div class="chain">
+          <div class="frame leaf"><span class="arrow">●</span><span class="fn">onRender</span><span class="src">Panel.tsx:559</span></div>
+          <div class="frame"><span class="arrow">↑</span><span class="fn">commitLayoutEffectOnFiber</span></div>
+          <div class="frame"><span class="arrow">↑</span><span class="fn">commitLayoutMountEffects_complete</span></div>
+          <div class="frame"><span class="arrow">↑</span><span class="fn">commitLayoutEffects_begin</span></div>
+          <div class="frame"><span class="arrow">↑</span><span class="fn">commitLayoutEffects</span></div>
+        </div>
+      </div>
+      <div class="split-body">
+        <div class="cause">
+          <div class="col-label">原因</div>
+          <p><strong>每个面板</strong>都被包在 React <code class="inline">&lt;Profiler&gt;</code> 里，每次 commit 都执行 <code class="inline">perfInfo.current.innerText = ...</code> —— 也就是面板左上角那个 <code class="inline">528 / 0.1ms</code> 计数器。多个面板 ×&nbsp;每帧刷新，是一直在付的调试开销。</p>
+        </div>
+        <div class="fix">
+          <div class="col-label">优化建议</div>
+          <p>用 dev flag 或设置项<strong>门控这个性能覆盖层</strong>：关闭时不包 <code class="inline">&lt;Profiler&gt;</code>、不写 <code class="inline">innerText</code>。改动小、无风险，直接省掉每帧的 Profiler 回调与 DOM 写入。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CARD C -->
+  <div class="card">
+    <div class="top">
+      <div class="rank"><span class="badge p3">明确的 Layout Thrashing</span></div>
+      <h3>HoverTooltip 在 render body 里同步读布局</h3>
+      <div class="whereami">HoverTooltip.tsx:257</div>
+      <div class="selft">
+        <div class="track"><div class="fill" style="width:23.9%"></div></div>
+        <div class="ms">295 ms</div>
+      </div>
+    </div>
+    <div class="split">
+      <div class="chain-col">
+        <div class="col-label">调用链</div>
+        <div class="chain">
+          <div class="frame leaf"><span class="arrow">●</span><span class="fn">getBoundingClientRect</span></div>
+          <div class="frame"><span class="arrow">↑</span><span class="fn">HoverTooltip</span><span class="src">HoverTooltip.tsx:257</span></div>
+          <div class="frame"><span class="arrow">↑</span><span class="fn">renderWithHooks</span><span class="src">react-dom</span></div>
+          <div class="frame"><span class="arrow">↑</span><span class="fn">beginWork</span><span class="src">react-dom</span></div>
+        </div>
+      </div>
+      <div class="split-body">
+        <div class="cause">
+          <div class="col-label">原因</div>
+          <p>组件在渲染函数里<strong>直接</strong>调用 <code class="inline">canvas.getBoundingClientRect()</code>，还读了 <code class="inline">offsetWidth / offsetHeight</code>。3D 面板播放时持续重渲染，每次渲染都强制一次同步 layout —— 典型的 layout thrashing。</p>
+        </div>
+        <div class="fix">
+          <div class="col-label">优化建议</div>
+          <p>用 <code class="inline">ResizeObserver</code> <strong>缓存 canvas 边界</strong>，仅在尺寸真正变化时更新；把布局读取移出 render body（放到 <code class="inline">useLayoutEffect</code> 或事件回调），避免每帧强制回流。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CARD D -->
+  <div class="card">
+    <div class="top">
+      <div class="rank"><span class="badge p4">场景相关</span></div>
+      <h3>three.js 每帧上传纹理</h3>
+      <div class="whereami">three.module.js · WebGLRenderer</div>
+      <div class="selft">
+        <div class="track"><div class="fill" style="width:9.3%"></div></div>
+        <div class="ms">115 ms</div>
+      </div>
+    </div>
+    <div class="split">
+      <div class="chain-col">
+        <div class="col-label">调用链</div>
+        <div class="chain">
+          <div class="frame leaf"><span class="arrow">●</span><span class="fn">texSubImage2D</span><span class="src">WebGL</span></div>
+          <div class="frame"><span class="arrow">↑</span><span class="fn">uploadTexture</span></div>
+          <div class="frame"><span class="arrow">↑</span><span class="fn">setTexture2D</span></div>
+          <div class="frame"><span class="arrow">↑</span><span class="fn">renderBufferDirect</span></div>
+          <div class="frame"><span class="arrow">↑</span><span class="fn">renderObjects</span><span class="src">renderScene</span></div>
+          <div class="frame"><span class="arrow">↑</span><span class="fn">WebGLRenderer.render</span></div>
+        </div>
+      </div>
+      <div class="split-body">
+        <div class="cause">
+          <div class="col-label">原因</div>
+          <p>渲染循环里每帧把纹理（图像面板 / 3D 贴图）重新上传到 GPU。<code class="inline">texSubImage2D</code> 的开销随图像分辨率上升，图像面板活跃时才明显。</p>
+        </div>
+        <div class="fix">
+          <div class="col-label">优化建议</div>
+          <p>仅在图像数据真正变化时置 <code class="inline">texture.needsUpdate = true</code>，避免每帧重传；可考虑 <code class="inline">texStorage</code> + 纹理复用，减少重新分配。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="block">数据线程（与渲染解耦）</h2>
+  <p class="block-desc">采样里第二个繁忙线程是 MCAP 数据管线，运行在独立 worker，不阻塞主渲染线程 —— 仅供参考，不是当前的渲染瓶颈。</p>
+  <div class="worker">
+    <h3>MCAP 加载与解压 · Web Worker</h3>
+    <p>调用链根为 <code class="inline">#loadChunkData</code>（McapIndexedReader.js:357），下游是 lz4 解压、chunk 解析与消息迭代。数据准备与画面绘制分离，因此即便这里较重，也不会拖慢帧率。</p>
+    <div class="chips">
+      <span class="chip"><b>#loadChunkData</b> 563 ms</span>
+      <span class="chip"><b>lz4 decompress</b> ~15 ms</span>
+      <span class="chip"><b>parseChunk</b> ~3 ms</span>
+      <span class="chip"><b>messageIterator</b> ~21 ms</span>
+      <span class="chip">VirtualLRUBuffer.slice ~43 ms</span>
+    </div>
+  </div>
+
+  <h2 class="block">优化优先级</h2>
+  <p class="block-desc">按“投入产出比”排序 —— 先摘容易的，再攻收益大的。</p>
+  <div class="ladder">
+    <div class="rung">
+      <span class="n">1</span>
+      <div class="txt"><strong>门控面板 Profiler 调试计数器（B）</strong><span>改动最小、无风险，直接去掉每帧的 Profiler 回调与 innerText 写入。</span></div>
+      <span class="effort low">投入 低</span>
+    </div>
+    <div class="rung">
+      <span class="n">2</span>
+      <div class="txt"><strong>修复 HoverTooltip 的同步布局读取（C）</strong><span>用 ResizeObserver 缓存边界，消除播放时的 layout thrashing。</span></div>
+      <span class="effort med">投入 中</span>
+    </div>
+    <div class="rung">
+      <span class="n">3</span>
+      <div class="txt"><strong>收敛播放期间的 React 重渲染（A）</strong><span>收益最大，但需定位并 memo 化每帧重渲染的组件、绕开逐帧样式写入。</span></div>
+      <span class="effort high">投入 高</span>
+    </div>
+    <div class="rung">
+      <span class="n">4</span>
+      <div class="txt"><strong>按需更新 three.js 纹理（D）</strong><span>仅图像 / 3D 场景活跃时才明显，条件化 needsUpdate。</span></div>
+      <span class="effort med">投入 中</span>
+    </div>
+  </div>
+
+  <footer>
+    Chrome DevTools MCP · performance trace · JS CPU Profile 聚合（self-time 加权 timeDeltas）· 调用链由 ProfileChunk 的 parent 链重建
+  </footer>
+</div>
