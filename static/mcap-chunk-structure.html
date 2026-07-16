@@ -1,0 +1,1158 @@
+<!--
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this
+file, You can obtain one at http://mozilla.org/MPL/2.0/.
+-->
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="MCAP Chunk 二进制结构、MessageIndex、ChunkIndex 与索引随机读取关系图"
+    />
+    <title>MCAP 数据块与索引结构</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2319333d'/%3E%3Cpath d='M12 44V18h9l11 14 11-14h9v26h-8V29L35 41h-6l-9-12v15z' fill='%23e8a93c'/%3E%3C/svg%3E"
+    />
+    <style>
+      :root {
+        --paper: #f2eee4;
+        --paper-deep: #e6dfd0;
+        --ink: #152d35;
+        --ink-soft: #52656a;
+        --night: #19333d;
+        --night-2: #234854;
+        --line: #bdc8c5;
+        --white: #fffdf7;
+        --chunk: #e8a93c;
+        --chunk-pale: #f8e2b3;
+        --chunk-deep: #9a5b0b;
+        --message-index: #795f91;
+        --message-index-pale: #eee6f3;
+        --chunk-index: #4e7f55;
+        --chunk-index-pale: #e3efe2;
+        --decoded: #4d9a8d;
+        --decoded-pale: #d9eee9;
+        --blue-pale: #dbe9ed;
+        --shadow: 0 28px 70px rgba(33, 43, 39, 0.14);
+        --radius: 16px;
+        --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        --sans: "Avenir Next", Avenir, "Trebuchet MS", "Microsoft YaHei", sans-serif;
+        --serif: Georgia, "Times New Roman", "Songti SC", serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        color-scheme: light;
+        background: #d9d4c9;
+      }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        font-family: var(--sans);
+        background:
+          radial-gradient(circle at 12% 8%, rgba(232, 169, 60, 0.2), transparent 30rem),
+          radial-gradient(circle at 88% 12%, rgba(77, 154, 141, 0.18), transparent 34rem),
+          #d9d4c9;
+      }
+
+      button {
+        font: inherit;
+      }
+
+      code {
+        font-family: var(--mono);
+        font-size: 0.92em;
+        letter-spacing: -0.025em;
+      }
+
+      .toolbar {
+        position: sticky;
+        z-index: 20;
+        top: 0;
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        padding: 10px max(18px, calc((100vw - 1760px) / 2));
+        border-bottom: 1px solid rgba(21, 45, 53, 0.14);
+        background: rgba(242, 238, 228, 0.86);
+        backdrop-filter: blur(14px);
+      }
+
+      .toolbar button {
+        min-height: 36px;
+        padding: 0 14px;
+        color: var(--ink);
+        border: 1px solid rgba(21, 45, 53, 0.24);
+        border-radius: 999px;
+        background: rgba(255, 253, 247, 0.8);
+        cursor: pointer;
+        transition:
+          transform 160ms ease,
+          background 160ms ease,
+          color 160ms ease;
+      }
+
+      .toolbar button:hover {
+        color: var(--white);
+        background: var(--night);
+        transform: translateY(-1px);
+      }
+
+      .page-shell {
+        padding: 22px;
+      }
+
+      .slide {
+        position: relative;
+        width: min(100%, 1760px);
+        min-height: min(990px, calc(100vw * 0.5625));
+        margin: 0 auto;
+        padding: clamp(26px, 3.1vw, 58px);
+        overflow: hidden;
+        border: 1px solid rgba(21, 45, 53, 0.15);
+        border-radius: 24px;
+        background:
+          linear-gradient(rgba(21, 45, 53, 0.025) 1px, transparent 1px) 0 0 / 28px 28px,
+          linear-gradient(90deg, rgba(21, 45, 53, 0.025) 1px, transparent 1px) 0 0 / 28px 28px,
+          var(--paper);
+        box-shadow: var(--shadow);
+      }
+
+      .slide::before {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 10px;
+        height: 100%;
+        content: "";
+        background: linear-gradient(var(--chunk), var(--decoded));
+      }
+
+      .masthead {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 28px;
+        align-items: end;
+        margin-bottom: clamp(18px, 2vw, 34px);
+      }
+
+      .eyebrow,
+      .section-kicker {
+        margin: 0 0 8px;
+        color: var(--chunk-deep);
+        font-family: var(--mono);
+        font-size: clamp(10px, 0.75vw, 13px);
+        font-weight: 800;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        font-family: var(--serif);
+        font-size: clamp(36px, 4.3vw, 74px);
+        font-weight: 700;
+        line-height: 0.95;
+        letter-spacing: -0.045em;
+      }
+
+      .subtitle {
+        margin: 12px 0 0;
+        color: var(--ink-soft);
+        font-family: var(--mono);
+        font-size: clamp(11px, 0.92vw, 15px);
+      }
+
+      .version-stamp {
+        display: grid;
+        min-width: 150px;
+        padding: 14px 16px;
+        color: var(--white);
+        border-radius: 2px 14px 2px 14px;
+        background: var(--night);
+        box-shadow: 8px 8px 0 var(--chunk);
+      }
+
+      .version-stamp strong {
+        font-family: var(--mono);
+        font-size: 20px;
+        letter-spacing: 0.05em;
+      }
+
+      .version-stamp span {
+        margin-top: 4px;
+        color: #c8d8da;
+        font-size: 11px;
+      }
+
+      .diagram-grid {
+        display: grid;
+        grid-template-columns: minmax(260px, 0.72fr) minmax(0, 2fr);
+        gap: clamp(15px, 1.5vw, 26px);
+        align-items: stretch;
+      }
+
+      .panel {
+        position: relative;
+        min-width: 0;
+        padding: clamp(14px, 1.35vw, 24px);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgba(255, 253, 247, 0.94);
+        box-shadow: 0 10px 30px rgba(33, 43, 39, 0.07);
+      }
+
+      .panel-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        align-items: baseline;
+        margin-bottom: 12px;
+      }
+
+      .panel h2 {
+        margin: 0;
+        font-family: var(--serif);
+        font-size: clamp(19px, 1.45vw, 27px);
+        line-height: 1.05;
+      }
+
+      .panel-number {
+        color: var(--line);
+        font-family: var(--mono);
+        font-size: clamp(18px, 1.4vw, 24px);
+        font-weight: 900;
+      }
+
+      .file-map {
+        position: relative;
+        isolation: isolate;
+        min-height: 520px;
+        padding-right: 36px;
+      }
+
+      .file-stack {
+        position: relative;
+        z-index: 2;
+        overflow: hidden;
+        border: 1px solid #b7c4c3;
+        border-radius: 10px;
+        background: var(--white);
+      }
+
+      .file-row {
+        position: relative;
+        padding: 8px 12px;
+        border-bottom: 1px solid rgba(21, 45, 53, 0.12);
+        font-size: clamp(9px, 0.68vw, 12px);
+        line-height: 1.34;
+      }
+
+      .file-row:last-child {
+        border-bottom: 0;
+      }
+
+      .file-row strong {
+        display: block;
+        font-family: var(--mono);
+        font-size: 1.03em;
+      }
+
+      .file-row small {
+        display: block;
+        margin-top: 2px;
+        color: var(--ink-soft);
+      }
+
+      .file-row.header,
+      .file-row.data-end,
+      .file-row.footer {
+        background: var(--blue-pale);
+      }
+
+      .file-row.chunk {
+        padding-top: 14px;
+        padding-bottom: 14px;
+        color: #4e3308;
+        border-top: 2px solid var(--chunk-deep);
+        border-bottom: 2px solid var(--chunk-deep);
+        background: var(--chunk-pale);
+      }
+
+      .file-row.message-index {
+        padding-top: 11px;
+        padding-bottom: 11px;
+        background: var(--message-index-pale);
+      }
+
+      .file-row.summary {
+        padding-top: 13px;
+        padding-bottom: 13px;
+        background: var(--chunk-index-pale);
+      }
+
+      .physical-tag {
+        position: absolute;
+        z-index: 3;
+        top: 126px;
+        right: 5px;
+        padding: 5px 7px;
+        color: var(--white);
+        border-radius: 999px;
+        background: var(--chunk-deep);
+        font-family: var(--mono);
+        font-size: 9px;
+        writing-mode: vertical-rl;
+      }
+
+      .map-links {
+        position: absolute;
+        z-index: 4;
+        inset: 52px -4px 2px 8px;
+        width: calc(100% - 4px);
+        height: calc(100% - 54px);
+        overflow: visible;
+        pointer-events: none;
+      }
+
+      .map-links path {
+        fill: none;
+        stroke: var(--chunk-index);
+        stroke-dasharray: 5 5;
+        stroke-linecap: round;
+        stroke-width: 2;
+      }
+
+      .map-links text {
+        fill: var(--chunk-index);
+        font-family: var(--mono);
+        font-size: 8px;
+        font-weight: 800;
+      }
+
+      .map-note {
+        display: flex;
+        gap: 8px;
+        align-items: flex-start;
+        margin: 12px 0 0;
+        color: var(--ink-soft);
+        font-family: var(--serif);
+        font-size: clamp(9px, 0.64vw, 11px);
+        line-height: 1.45;
+      }
+
+      .map-note::before {
+        flex: 0 0 8px;
+        width: 8px;
+        height: 8px;
+        margin-top: 3px;
+        content: "";
+        border-radius: 50%;
+        background: var(--chunk-index);
+      }
+
+      .anatomy-panel {
+        border-color: rgba(154, 91, 11, 0.6);
+        box-shadow:
+          inset 0 0 0 1px rgba(232, 169, 60, 0.22),
+          0 12px 36px rgba(93, 63, 17, 0.1);
+      }
+
+      .byte-strip {
+        display: grid;
+        grid-template-columns: 0.72fr 0.85fr 1.2fr 1.2fr 1.05fr 0.95fr 0.95fr 1.05fr 1.38fr;
+        min-height: 112px;
+        overflow: hidden;
+        border: 1px solid rgba(21, 45, 53, 0.22);
+        border-radius: 10px;
+      }
+
+      .byte-cell {
+        min-width: 0;
+        padding: clamp(7px, 0.75vw, 13px) clamp(5px, 0.58vw, 10px);
+        border-right: 1px solid rgba(21, 45, 53, 0.18);
+        background: #faeac8;
+      }
+
+      .byte-cell:last-child {
+        border-right: 0;
+      }
+
+      .byte-cell.dark {
+        color: var(--white);
+        background: var(--night);
+      }
+
+      .byte-cell.dark-2 {
+        color: var(--white);
+        background: var(--night-2);
+      }
+
+      .byte-cell.accent {
+        color: #4e3308;
+        background: var(--chunk);
+      }
+
+      .byte-cell .cn {
+        display: block;
+        min-height: 2.55em;
+        font-family: var(--serif);
+        font-size: clamp(8px, 0.66vw, 12px);
+        font-weight: 800;
+        line-height: 1.25;
+      }
+
+      .byte-cell code {
+        display: block;
+        margin-top: 6px;
+        overflow-wrap: anywhere;
+        font-size: clamp(7px, 0.56vw, 10px);
+        font-weight: 800;
+        line-height: 1.2;
+      }
+
+      .byte-cell .type {
+        display: block;
+        margin-top: 5px;
+        color: currentColor;
+        font-family: var(--mono);
+        font-size: clamp(7px, 0.5vw, 9px);
+        opacity: 0.68;
+      }
+
+      .decompress-line {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        align-items: center;
+        margin: 10px 3% 8px;
+        color: var(--decoded);
+      }
+
+      .decompress-line::before {
+        height: 1px;
+        content: "";
+        background: linear-gradient(90deg, transparent, var(--decoded));
+      }
+
+      .decompress-line span {
+        font-family: var(--mono);
+        font-size: clamp(9px, 0.65vw, 11px);
+        font-weight: 800;
+      }
+
+      .decoded-box {
+        position: relative;
+        padding: 12px;
+        border: 1px solid rgba(77, 154, 141, 0.6);
+        border-radius: 10px;
+        background: var(--decoded-pale);
+      }
+
+      .decoded-title {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 9px;
+        color: #2c675e;
+        font-size: clamp(9px, 0.68vw, 12px);
+        font-weight: 800;
+      }
+
+      .record-row {
+        display: grid;
+        grid-template-columns: 0.75fr 0.8fr repeat(3, 1.1fr) 0.45fr;
+        gap: 5px;
+      }
+
+      .record {
+        position: relative;
+        min-width: 0;
+        padding: 10px 8px;
+        overflow: hidden;
+        border: 1px solid rgba(21, 45, 53, 0.12);
+        border-radius: 7px;
+        background: rgba(255, 253, 247, 0.68);
+        font-family: var(--mono);
+        font-size: clamp(8px, 0.6vw, 11px);
+        text-align: center;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .record.message {
+        color: #113d37;
+        border-color: rgba(44, 103, 94, 0.34);
+        background: #84c0b5;
+        font-weight: 900;
+      }
+
+      .record.message::before {
+        position: absolute;
+        top: 0;
+        left: 0;
+        padding: 2px 4px;
+        color: var(--white);
+        content: attr(data-offset);
+        background: var(--night);
+        font-size: 6px;
+        font-weight: 500;
+      }
+
+      .decoded-note {
+        margin: 8px 0 0;
+        color: #3f6d66;
+        font-family: var(--serif);
+        font-size: clamp(8px, 0.57vw, 10px);
+        line-height: 1.4;
+      }
+
+      .index-cards {
+        display: grid;
+        grid-template-columns: 0.92fr 1.25fr;
+        gap: 9px;
+        margin-top: 10px;
+      }
+
+      .index-card {
+        min-width: 0;
+        padding: 10px 12px;
+        border-left: 5px solid;
+        border-radius: 7px;
+        font-size: clamp(8px, 0.59vw, 10px);
+        line-height: 1.38;
+      }
+
+      .index-card.message-index {
+        border-color: var(--message-index);
+        background: var(--message-index-pale);
+      }
+
+      .index-card.chunk-index {
+        border-color: var(--chunk-index);
+        background: var(--chunk-index-pale);
+      }
+
+      .index-card h3 {
+        margin: 0 0 5px;
+        font-family: var(--serif);
+        font-size: clamp(13px, 0.92vw, 17px);
+      }
+
+      .index-card p {
+        margin: 0;
+        font-family: var(--serif);
+      }
+
+      .index-card .field-list {
+        display: block;
+        margin-top: 5px;
+        color: var(--ink-soft);
+        line-height: 1.45;
+      }
+
+      .flow-panel {
+        grid-column: 1 / -1;
+        padding: clamp(15px, 1.35vw, 24px);
+        color: var(--white);
+        border: 0;
+        background:
+          linear-gradient(110deg, rgba(232, 169, 60, 0.12), transparent 38%),
+          var(--night);
+      }
+
+      .flow-panel .panel-head {
+        margin-bottom: 10px;
+      }
+
+      .flow-panel h2 {
+        color: var(--white);
+      }
+
+      .flow-panel .panel-number {
+        color: rgba(255, 255, 255, 0.22);
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr;
+        gap: clamp(7px, 0.75vw, 13px);
+        align-items: center;
+      }
+
+      .flow-step {
+        min-width: 0;
+        padding: 11px 12px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 9px;
+        background: rgba(255, 255, 255, 0.055);
+      }
+
+      .flow-step .n {
+        display: inline-grid;
+        width: 23px;
+        height: 23px;
+        margin-right: 6px;
+        place-items: center;
+        color: var(--night);
+        border-radius: 50%;
+        background: var(--chunk);
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 900;
+      }
+
+      .flow-step strong {
+        font-family: var(--serif);
+        font-size: clamp(13px, 0.95vw, 17px);
+      }
+
+      .flow-step p {
+        margin: 7px 0 0;
+        color: #c8d8da;
+        font-family: var(--serif);
+        font-size: clamp(8px, 0.62vw, 11px);
+        line-height: 1.38;
+      }
+
+      .flow-arrow {
+        color: var(--chunk);
+        font-family: var(--mono);
+        font-size: clamp(18px, 1.6vw, 28px);
+        font-weight: 900;
+      }
+
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px 15px;
+        margin-top: 15px;
+        color: var(--ink-soft);
+        font-size: clamp(8px, 0.58vw, 10px);
+      }
+
+      .legend span {
+        display: inline-flex;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .legend i {
+        width: 9px;
+        height: 9px;
+        border-radius: 2px;
+      }
+
+      .footnote {
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+        margin-top: 12px;
+        color: var(--ink-soft);
+        font-family: var(--mono);
+        font-size: clamp(7px, 0.54vw, 9px);
+      }
+
+      @media (max-width: 1080px) {
+        .slide {
+          min-height: auto;
+        }
+
+        .diagram-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .file-map {
+          min-height: auto;
+        }
+
+        .map-links,
+        .physical-tag {
+          display: none;
+        }
+
+        .byte-strip {
+          grid-template-columns: repeat(3, 1fr);
+        }
+
+        .byte-cell {
+          border-bottom: 1px solid rgba(21, 45, 53, 0.18);
+        }
+
+        .flow {
+          grid-template-columns: 1fr;
+        }
+
+        .flow-arrow {
+          line-height: 0.6;
+          text-align: center;
+          transform: rotate(90deg);
+        }
+      }
+
+      @media (max-width: 680px) {
+        .toolbar {
+          position: static;
+          justify-content: center;
+        }
+
+        .page-shell {
+          padding: 8px;
+        }
+
+        .slide {
+          padding: 24px 18px;
+          border-radius: 14px;
+        }
+
+        .masthead {
+          grid-template-columns: 1fr;
+        }
+
+        .version-stamp {
+          justify-self: start;
+        }
+
+        .byte-strip,
+        .record-row,
+        .index-cards {
+          grid-template-columns: 1fr;
+        }
+
+        .byte-cell {
+          border-right: 0;
+        }
+
+        .byte-cell .cn {
+          min-height: 0;
+        }
+
+        .record.message::before {
+          position: static;
+          display: inline-block;
+          margin-right: 6px;
+          vertical-align: 1px;
+        }
+
+        .footnote {
+          flex-direction: column;
+        }
+      }
+
+      @media print {
+        @page {
+          size: 16in 9in;
+          margin: 0;
+        }
+
+        html,
+        body {
+          width: 16in;
+          height: 9in;
+          background: var(--paper);
+          print-color-adjust: exact;
+          -webkit-print-color-adjust: exact;
+        }
+
+        .toolbar {
+          display: none;
+        }
+
+        .page-shell {
+          width: 16in;
+          height: 9in;
+          padding: 0;
+        }
+
+        .slide {
+          width: 16in;
+          height: 9in;
+          min-height: 0;
+          padding: 0.36in 0.46in;
+          border: 0;
+          border-radius: 0;
+          box-shadow: none;
+        }
+
+        .slide::before {
+          width: 0.07in;
+        }
+
+        .masthead {
+          grid-template-columns: minmax(0, 1fr) auto;
+          margin-bottom: 0.18in;
+        }
+
+        h1 {
+          font-size: 0.48in;
+        }
+
+        .diagram-grid {
+          grid-template-columns: 3.2in 1fr;
+          grid-template-rows: 4.75in 1.55in;
+          gap: 0.14in;
+        }
+
+        .panel {
+          padding: 0.12in;
+        }
+
+        .file-map {
+          display: block;
+          height: 4.75in;
+          min-height: 0;
+        }
+
+        .anatomy-panel {
+          height: 4.75in;
+        }
+
+        .physical-tag {
+          display: block;
+        }
+
+        /* Chromium PDF can mis-rasterize SVG marker overflow. The relationship remains explicit
+           in the adjacent note, while the routed SVG arrows stay visible in screen mode. */
+        .map-links {
+          display: none;
+        }
+
+        .byte-strip {
+          grid-template-columns: 0.72fr 0.85fr 1.2fr 1.2fr 1.05fr 0.95fr 0.95fr 1.05fr 1.38fr;
+          min-height: 0.92in;
+        }
+
+        .byte-cell {
+          border-right: 1px solid rgba(21, 45, 53, 0.18);
+          border-bottom: 0;
+        }
+
+        .byte-cell:last-child {
+          border-right: 0;
+        }
+
+        .byte-cell .cn {
+          min-height: 2.55em;
+        }
+
+        .record-row {
+          grid-template-columns: 0.75fr 0.8fr repeat(3, 1.1fr) 0.45fr;
+        }
+
+        .record.message::before {
+          position: absolute;
+          display: block;
+          margin: 0;
+        }
+
+        .index-cards {
+          grid-template-columns: 0.92fr 1.25fr;
+        }
+
+        .flow-panel {
+          height: 1.55in;
+          padding-top: 0.11in;
+          padding-bottom: 0.11in;
+        }
+
+        .flow-step {
+          padding: 0.06in 0.08in;
+        }
+
+        .flow-step p {
+          margin-top: 0.03in;
+        }
+
+        .flow {
+          grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr;
+        }
+
+        .flow-arrow {
+          line-height: normal;
+          transform: none;
+        }
+
+        .footnote {
+          flex-direction: row;
+        }
+      }
+
+      :fullscreen .toolbar {
+        display: none;
+      }
+
+      :fullscreen .page-shell {
+        display: grid;
+        min-height: 100vh;
+        padding: 0;
+        place-items: center;
+        background: #111d21;
+      }
+
+      :fullscreen .slide {
+        width: min(100vw, 177.7778vh);
+        height: min(56.25vw, 100vh);
+        min-height: 0;
+        border-radius: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="toolbar" aria-label="页面工具">
+      <button type="button" id="fullscreenButton" aria-pressed="false">全屏演示</button>
+      <button type="button" onclick="window.print()">打印 / 导出 PDF</button>
+    </nav>
+
+    <main class="page-shell">
+      <article class="slide" aria-labelledby="page-title">
+        <header class="masthead">
+          <div>
+            <p class="eyebrow">Binary anatomy · indexed access</p>
+            <h1 id="page-title">MCAP 数据块与索引结构</h1>
+            <p class="subtitle">Chunk Anatomy &amp; Indexed Random Access</p>
+          </div>
+          <div class="version-stamp" aria-label="实现依据">
+            <strong>MCAP / 06</strong>
+            <span>verified against @mcap/core 2.2.0</span>
+          </div>
+        </header>
+
+        <div class="diagram-grid">
+          <section class="panel file-map" aria-labelledby="file-map-title">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Physical layout</p>
+                <h2 id="file-map-title">MCAP 文件地图</h2>
+              </div>
+              <span class="panel-number">01</span>
+            </div>
+
+            <div class="file-stack" aria-label="MCAP 文件物理排列">
+              <div class="file-row header"><strong>Magic + Header</strong></div>
+              <div class="file-row"><strong>Schema · Channel</strong></div>
+              <div class="file-row chunk" id="chunk-record">
+                <strong>Chunk #N</strong>
+                <small>compressed data record</small>
+              </div>
+              <div class="file-row message-index" id="message-index-record">
+                <strong>MessageIndex × channel</strong>
+                <small><code>channelId → (logTime, offset)</code></small>
+              </div>
+              <div class="file-row"><strong>… more chunks …</strong></div>
+              <div class="file-row data-end"><strong>DataEnd</strong></div>
+              <div class="file-row summary" id="summary-record">
+                <strong>Summary Section</strong>
+                <small>Schema · Channel · Statistics</small>
+                <small><b>ChunkIndex #N</b> · SummaryOffset</small>
+              </div>
+              <div class="file-row footer"><strong>Footer + Magic</strong></div>
+            </div>
+
+            <span class="physical-tag">Data Section</span>
+            <svg class="map-links" viewBox="0 0 280 470" aria-hidden="true">
+              <defs>
+                <marker
+                  id="arrowHead"
+                  markerWidth="7"
+                  markerHeight="7"
+                  refX="5.5"
+                  refY="3.5"
+                  orient="auto"
+                >
+                  <path d="M 0 0 L 7 3.5 L 0 7 z" fill="#4e7f55" stroke="none" />
+                </marker>
+              </defs>
+              <path d="M 250 366 C 276 350, 276 122, 231 121" marker-end="url(#arrowHead)" />
+              <path d="M 240 379 C 271 365, 270 190, 231 188" marker-end="url(#arrowHead)" />
+              <text x="204" y="246" transform="rotate(-90 204 246)">offset links</text>
+            </svg>
+
+            <p class="map-note">
+              <span>
+                <b>MessageIndex 是独立 record</b>，位于 Data Section、紧随对应 Chunk；
+                <b>ChunkIndex 位于 Summary</b>，通过文件偏移同时关联两者。
+              </span>
+            </p>
+          </section>
+
+          <section class="panel anatomy-panel" aria-labelledby="anatomy-title">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Binary record</p>
+                <h2 id="anatomy-title">Chunk #N 二进制放大剖面</h2>
+              </div>
+              <span class="panel-number">02</span>
+            </div>
+
+            <figure style="margin: 0" aria-label="Chunk record 字段顺序">
+              <div class="byte-strip">
+                <div class="byte-cell dark">
+                  <span class="cn">操作码</span>
+                  <code>opcode = 0x06</code>
+                  <span class="type">uint8</span>
+                </div>
+                <div class="byte-cell dark-2">
+                  <span class="cn">记录内容长度</span>
+                  <code>recordLength</code>
+                  <span class="type">uint64</span>
+                </div>
+                <div class="byte-cell">
+                  <span class="cn">消息起始时间</span>
+                  <code>messageStartTime</code>
+                  <span class="type">uint64</span>
+                </div>
+                <div class="byte-cell">
+                  <span class="cn">消息结束时间</span>
+                  <code>messageEndTime</code>
+                  <span class="type">uint64</span>
+                </div>
+                <div class="byte-cell">
+                  <span class="cn">解压后大小</span>
+                  <code>uncompressedSize</code>
+                  <span class="type">uint64</span>
+                </div>
+                <div class="byte-cell">
+                  <span class="cn">内容校验</span>
+                  <code>uncompressedCrc</code>
+                  <span class="type">uint32</span>
+                </div>
+                <div class="byte-cell">
+                  <span class="cn">压缩算法</span>
+                  <code>compression</code>
+                  <span class="type">string</span>
+                </div>
+                <div class="byte-cell">
+                  <span class="cn">记录区长度</span>
+                  <code>recordsByteLength</code>
+                  <span class="type">uint64</span>
+                </div>
+                <div class="byte-cell accent">
+                  <span class="cn">压缩记录区</span>
+                  <code>records</code>
+                  <span class="type">bytes</span>
+                </div>
+              </div>
+
+              <div class="decompress-line">
+                <span>decompress(compression) ↓</span>
+              </div>
+
+              <div class="decoded-box">
+                <div class="decoded-title">
+                  <span>解压后的 records</span>
+                  <code>MessageIndex.offset → Message record</code>
+                </div>
+                <div class="record-row">
+                  <div class="record">Schema</div>
+                  <div class="record">Channel</div>
+                  <div class="record message" data-offset="0x0028">Message #1</div>
+                  <div class="record message" data-offset="0x08F0">Message #2</div>
+                  <div class="record message" data-offset="0x1148">Message #3</div>
+                  <div class="record">…</div>
+                </div>
+                <p class="decoded-note">
+                  Schema 与 Channel 可按需要出现在数据块中；Message 是主要内容。索引偏移针对的是
+                  <b>解压后的记录空间</b>。
+                </p>
+              </div>
+            </figure>
+
+            <div class="index-cards">
+              <article class="index-card message-index">
+                <h3>MessageIndex</h3>
+                <p><b>每个 channel 一条</b></p>
+                <code>channelId → [(logTime, offset), …]</code>
+                <span class="field-list">offset 精确指向解压后某条 Message record。</span>
+              </article>
+              <article class="index-card chunk-index">
+                <h3>ChunkIndex <small>· Summary</small></h3>
+                <code class="field-list">
+                  messageStartTime · messageEndTime · chunkStartOffset · chunkLength<br />
+                  messageIndexOffsets · messageIndexLength · compression · compressedSize ·
+                  uncompressedSize
+                </code>
+              </article>
+            </div>
+          </section>
+
+          <section class="panel flow-panel" aria-labelledby="flow-title">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker" style="color: var(--chunk)">Reader path</p>
+                <h2 id="flow-title">Indexed Random Access</h2>
+              </div>
+              <span class="panel-number">03</span>
+            </div>
+            <div class="flow">
+              <article class="flow-step">
+                <span class="n">1</span><strong>查询时间范围</strong>
+                <p>筛选时间范围相交的 <code>ChunkIndex</code></p>
+              </article>
+              <span class="flow-arrow" aria-hidden="true">→</span>
+              <article class="flow-step">
+                <span class="n">2</span><strong>定位消息索引</strong>
+                <p>通过 <code>messageIndexOffsets</code> 读取相关索引</p>
+              </article>
+              <span class="flow-arrow" aria-hidden="true">→</span>
+              <article class="flow-step">
+                <span class="n">3</span><strong>加载数据块</strong>
+                <p>通过 <code>chunkStartOffset</code> 读取并解压 Chunk</p>
+              </article>
+              <span class="flow-arrow" aria-hidden="true">→</span>
+              <article class="flow-step">
+                <span class="n">4</span><strong>精确解析消息</strong>
+                <p>根据 <code>(logTime, offset)</code> 定位 Message</p>
+              </article>
+            </div>
+          </section>
+        </div>
+
+        <div class="legend" aria-label="颜色图例">
+          <span><i style="background: var(--chunk)"></i>Chunk / compressed payload</span>
+          <span><i style="background: var(--message-index)"></i>MessageIndex</span>
+          <span><i style="background: var(--chunk-index)"></i>ChunkIndex</span>
+          <span><i style="background: var(--decoded)"></i>decompressed record space</span>
+        </div>
+
+        <footer class="footnote">
+          <span>STRUCTURE MAP · NOT TO SCALE</span>
+          <span>Source mapping: @mcap/core 2.2.0 · parseChunk / ChunkCursor / readMessages</span>
+        </footer>
+      </article>
+    </main>
+
+    <script>
+      const fullscreenButton = document.querySelector("#fullscreenButton");
+
+      function updateFullscreenButton() {
+        const isFullscreen = document.fullscreenElement != null;
+        if (fullscreenButton) {
+          fullscreenButton.textContent = isFullscreen ? "退出全屏" : "全屏演示";
+          fullscreenButton.setAttribute("aria-pressed", String(isFullscreen));
+        }
+      }
+
+      fullscreenButton?.addEventListener("click", async () => {
+        try {
+          if (document.fullscreenElement) {
+            await document.exitFullscreen();
+          } else {
+            await document.documentElement.requestFullscreen();
+          }
+        } catch (error) {
+          console.error("Unable to change fullscreen state", error);
+        }
+      });
+
+      document.addEventListener("fullscreenchange", updateFullscreenButton);
+    </script>
+  </body>
+</html>
